@@ -1,0 +1,39 @@
+name: Sync Bestfy Transactions
+on:
+  schedule:
+    # Executa a cada 5 minutos
+    - cron: '*/5 * * * *'
+  # Permite execução manual também
+  workflow_dispatch:
+
+jobs:
+  sync-bestfy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sync Bestfy Transactions
+        run: |
+          echo "🔄 Iniciando sincronização automática..."
+          
+          response=$(curl -s -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.SUPABASE_URL }}/functions/v1/bestfy-cron")
+          
+          http_code="${response: -3}"
+          body="${response%???}"
+          
+          echo "📡 Status HTTP: $http_code"
+          echo "📦 Resposta: $body"
+          
+          if [ "$http_code" -eq 200 ]; then
+            echo "✅ Sincronização concluída com sucesso!"
+          else
+            echo "❌ Erro na sincronização!"
+            exit 1
+          fi
+
+      - name: Log Results
+        if: always()
+        run: |
+          echo "🕐 Sincronização executada em: $(date)"
+          echo "🔄 Próxima execução em: 5 minutos"
