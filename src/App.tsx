@@ -4,16 +4,19 @@ import AuthForm from './components/AuthForm';
 import Dashboard from './components/Dashboard';
 import AdminDashboard from './components/AdminDashboard';
 import Checkout from './components/Checkout';
+import SupabaseTest from './components/SupabaseTest';
 import { User } from '@supabase/supabase-js';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCheckoutPage, setIsCheckoutPage] = useState(false);
+  const [showSupabaseTest, setShowSupabaseTest] = useState(false);
 
   useEffect(() => {
     const path = window.location.pathname;
     setIsCheckoutPage(path.startsWith('/checkout/'));
+    setShowSupabaseTest(path === '/supabase-test');
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
@@ -31,6 +34,10 @@ function App() {
 
   if (isCheckoutPage) {
     return <Checkout />;
+  }
+
+  if (showSupabaseTest) {
+    return <SupabaseTest />;
   }
 
   if (loading) {
