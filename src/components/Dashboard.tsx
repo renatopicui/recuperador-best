@@ -443,7 +443,8 @@ export default function Dashboard({ user }: DashboardProps) {
                         <td className="py-4 px-4">
                           <div className="flex items-center gap-2">
                             {getStatusBadge(payment.status)}
-                            {checkout && checkout.thank_you_slug && payment.status === 'paid' && (
+                            {/* ✅ LÓGICA CORRIGIDA: Se thank_you_slug existe = venda recuperada */}
+                            {checkout && checkout.thank_you_slug && (
                               <span 
                                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r from-emerald-500/20 to-green-500/20 text-emerald-400 border-2 border-emerald-500/40 shadow-sm"
                                 title={`🎉 Venda recuperada através do nosso checkout!\nRecuperado em: ${checkout.thank_you_accessed_at ? new Date(checkout.thank_you_accessed_at).toLocaleString('pt-BR') : 'N/A'}`}
