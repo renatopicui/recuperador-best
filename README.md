@@ -2,6 +2,20 @@
 
 Sistema completo de gerenciamento de pagamentos PIX integrado com a API Bestfy, incluindo checkout personalizado com desconto, recuperação automática de carrinho abandonado, rastreamento de vendas recuperadas, sincronização em tempo real e painel administrativo.
 
+## ⚠️ IMPORTANTE: Sistema de Recuperação v2.0
+
+**Novo sistema de rastreamento com página de "Obrigado"** foi implementado!
+
+🔴 **SE O CHECKOUT NÃO REDIRECIONA APÓS PAGAMENTO:**
+1. Abra: `RESOLVER-PROBLEMA.md` - Guia completo de resolução
+2. Execute: `APLICAR-SISTEMA-RECUPERACAO.sql` no Supabase
+3. Siga: `GUIA-RAPIDO.md` para começar a usar
+
+📚 **Documentação Completa:**
+- `RESOLVER-PROBLEMA.md` - 🔧 Resolução de problemas (COMECE AQUI!)
+- `GUIA-RAPIDO.md` - 📝 Guia rápido de uso
+- `FLUXO-RECUPERACAO.md` - 📖 Documentação técnica completa
+
 ---
 
 ## 📋 Índice
@@ -1463,7 +1477,7 @@ Este sistema está 100% operacional e pronto para produção, incluindo:
 - **Selo Visual**: Ícone verde indica vendas que foram recuperadas pelo sistema
 - **Múltiplas Origens**: Diferencia vendas orgânicas de recuperadas
 
-### Checkout Inteligente
+###1 Checkout Inteligente
 - **URLs Únicas**: Cada checkout tem slug exclusivo para compartilhamento
 - **Desconto Dinâmico**: Sistema calcula e exibe preço original vs. com desconto
 - **Persistência de Estado**: PIX QR Code e dados mantidos entre acessos

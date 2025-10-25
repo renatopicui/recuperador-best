@@ -37,12 +37,10 @@ Deno.serve(async (req: Request) => {
       throw new Error('Variáveis de ambiente não configuradas');
     }
 
-    // Busca pagamentos pendentes criados há mais de 3 minutos e que ainda não receberam email
-    // Faz JOIN com checkout_links para obter o slug
-    const threeMinutesAgo = new Date(Date.now() - 3 * 60 * 1000).toISOString();
-
+    // Busca pagamentos pendentes que ainda não receberam email
+    // Vamos verificar o tempo configurado por cada usuário
     const paymentsResponse = await fetch(
-      `${supabaseUrl}/rest/v1/payments?status=eq.waiting_payment&payment_method=eq.pix&created_at=lt.${threeMinutesAgo}&recovery_email_sent_at=is.null&select=*,checkout_links(checkout_slug)`,
+      `${supabaseUrl}/rest/v1/payments?status=eq.waiting_payment&payment_method=eq.pix&recovery_email_sent_at=is.null&select=*,checkout_links(checkout_slug),user_id`,
       {
         method: 'GET',
         headers: {
@@ -57,12 +55,61 @@ Deno.serve(async (req: Request) => {
       throw new Error(`Erro ao buscar pagamentos: ${paymentsResponse.status}`);
     }
 
-    const paymentsRaw: (PaymentRecord & { checkout_links: CheckoutLinkRecord[] })[] = await paymentsResponse.json();
+    const paymentsRaw: (PaymentRecord & { checkout_links: CheckoutLinkRecord[], user_id?: string })[] = await paymentsResponse.json();
 
     // Filtra apenas pagamentos que têm checkout link
-    const payments = paymentsRaw.filter(p => p.checkout_links && p.checkout_links.length > 0);
+    const paymentsWithCheckout = paymentsRaw.filter(p => p.checkout_links && p.checkout_links.length > 0);
     
-    console.log(`📋 [RECOVERY-EMAILS] Encontrados ${payments.length} pagamentos pendentes`);
+    console.log(`📋 [RECOVERY-EMAILS] Encontrados ${paymentsWithCheckout.length} pagamentos com checkout`);
+
+    // Buscar configurações de todos os usuários
+    const userIds = [...new Set(paymentsWithCheckout.map(p => p.user_id).filter(Boolean))];
+    const userSettingsMap = new Map<string, number>();
+
+    // Buscar configurações de cada usuário
+    for (const userId of userIds) {
+      try {
+        const settingsResponse = await fetch(
+          `${supabaseUrl}/rest/v1/user_settings?user_id=eq.${userId}&select=recovery_email_delay_minutes`,
+          {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${supabaseServiceKey}`,
+              'apikey': supabaseServiceKey,
+              'Content-Type': 'application/json',
+            }
+          }
+        );
+
+        if (settingsResponse.ok) {
+          const settings = await settingsResponse.json();
+          if (settings && settings.length > 0) {
+            userSettingsMap.set(userId, settings[0].recovery_email_delay_minutes);
+            console.log(`⚙️ [RECOVERY-EMAILS] Usuário ${userId}: ${settings[0].recovery_email_delay_minutes} minutos`);
+          }
+        }
+      } catch (e) {
+        console.warn(`⚠️ [RECOVERY-EMAILS] Erro ao buscar configuração do usuário ${userId}:`, e);
+      }
+    }
+
+    // Filtrar pagamentos que já atingiram o tempo configurado
+    const payments = paymentsWithCheckout.filter(p => {
+      const delayMinutes = p.user_id ? (userSettingsMap.get(p.user_id) || 3) : 3;
+      const createdAt = new Date(p.created_at);
+      const now = new Date();
+      const minutesSinceCreation = (now.getTime() - createdAt.getTime()) / (1000 * 60);
+      
+      const shouldSend = minutesSinceCreation >= delayMinutes;
+      
+      if (!shouldSend) {
+        console.log(`⏳ [RECOVERY-EMAILS] Pagamento ${p.bestfy_id}: ${Math.floor(minutesSinceCreation)}/${delayMinutes} min - aguardando`);
+      }
+      
+      return shouldSend;
+    });
+    
+    console.log(`📤 [RECOVERY-EMAILS] ${payments.length} pagamentos prontos para envio`);
 
     const results = [];
 

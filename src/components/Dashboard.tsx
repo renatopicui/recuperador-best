@@ -5,6 +5,7 @@ import { bestfyService } from '../services/bestfyService';
 import { supabase } from '../services/supabaseService';
 import { Payment, CheckoutLink } from '../types/bestfy';
 import { LogOut, RefreshCw, CreditCard, Clock, XCircle, CheckCircle2, DollarSign, Mail, Eye, TrendingUp, Link2, Send } from 'lucide-react';
+import { apiKeyService } from '../services/apiKeyService';
 
 interface DashboardProps {
   user: User;
@@ -15,11 +16,29 @@ export default function Dashboard({ user }: DashboardProps) {
   const [checkoutLinks, setCheckoutLinks] = useState<CheckoutLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [savingApiKey, setSavingApiKey] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [apiKeyError, setApiKeyError] = useState('');
 
   useEffect(() => {
-    loadPayments();
-    loadCheckoutLinks();
+    ensureApiKey().then(() => {
+      loadPayments();
+      loadCheckoutLinks();
+    });
   }, []);
+
+  const ensureApiKey = async () => {
+    try {
+      const key = await apiKeyService.getApiKey();
+      if (!key) {
+        setShowApiKeyModal(true);
+      }
+    } catch (e) {
+      // silenciosamente não bloqueia, mas abre modal por segurança
+      setShowApiKeyModal(true);
+    }
+  };
 
   const loadPayments = async () => {
     try {
@@ -63,15 +82,51 @@ export default function Dashboard({ user }: DashboardProps) {
     await authService.signOut();
   };
 
+  const handleSaveApiKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!apiKeyInput.trim()) {
+      setApiKeyError('Informe sua chave da Bestfy');
+      return;
+    }
+    setApiKeyError('');
+    setSavingApiKey(true);
+    try {
+      await apiKeyService.saveApiKey(apiKeyInput.trim());
+      setShowApiKeyModal(false);
+      setApiKeyInput('');
+      // recarrega dados após configurar chave
+      await loadPayments();
+      await loadCheckoutLinks();
+    } catch (err: any) {
+      setApiKeyError(err.message || 'Falha ao salvar chave');
+    } finally {
+      setSavingApiKey(false);
+    }
+  };
+
   const totalTransactions = payments.length;
   const paidPayments = payments.filter(p => p.status === 'paid');
   const pendingPayments = payments.filter(p => p.status === 'waiting_payment');
-  const recoveredPayments = payments.filter(p => p.converted_from_recovery && p.status === 'paid');
+  
+  // 🎯 VENDAS RECUPERADAS: Checkouts que têm thank_you_slug (foram pagos e redirecionados)
+  const recoveredCheckouts = checkoutLinks.filter(cl => cl.thank_you_slug !== null && cl.thank_you_slug !== '');
+  const recoveredPayments = recoveredCheckouts.length;
+  
+  // 💰 VALORES RECUPERADOS: Soma dos valores dos checkouts recuperados
+  const recoveredAmount = recoveredCheckouts.reduce((sum, cl) => {
+    const amount = cl.final_amount || cl.amount || 0;
+    return sum + Number(amount);
+  }, 0);
+  
+  // 📧 E-mails enviados
   const emailsSent = payments.filter(p => p.recovery_email_sent_at).length;
-
-  const recoveredAmount = recoveredPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+  
+  // 📊 Total de acessos aos checkouts
   const totalCheckoutAccess = checkoutLinks.reduce((sum, cl) => sum + (cl.access_count || 0), 0);
-  const conversionRate = emailsSent > 0 ? (recoveredPayments.length / emailsSent) * 100 : 0;
+  
+  // 📈 TAXA DE CONVERSÃO: (checkouts recuperados / total de checkouts) * 100
+  const totalCheckouts = checkoutLinks.length;
+  const conversionRate = totalCheckouts > 0 ? (recoveredPayments / totalCheckouts) * 100 : 0;
 
   const stats = {
     total: totalTransactions,
@@ -80,7 +135,7 @@ export default function Dashboard({ user }: DashboardProps) {
     pending: pendingPayments.length,
     pendingAmount: pendingPayments.reduce((sum, p) => sum + Number(p.amount), 0),
     emailsSent,
-    recovered: recoveredPayments.length,
+    recovered: recoveredPayments, // recoveredPayments já é um número (linha 113)
     recoveredAmount,
     conversionRate,
     checkoutAccess: totalCheckoutAccess,
@@ -133,6 +188,47 @@ export default function Dashboard({ user }: DashboardProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-6">
       <div className="max-w-7xl mx-auto">
+        {showApiKeyModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+            <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 w-full max-w-md mx-4">
+              <h2 className="text-xl font-bold text-white mb-2">Configurar API Key da Bestfy</h2>
+              <p className="text-gray-400 mb-4">Para criar cobranças PIX, insira sua chave de API da Bestfy. Ela será validada e salva com segurança.</p>
+              {apiKeyError && (
+                <div className="bg-red-500/10 border border-red-500/50 text-red-400 px-4 py-2 rounded-lg mb-4">{apiKeyError}</div>
+              )}
+              <form onSubmit={handleSaveApiKey} className="space-y-4">
+                <div>
+                  <label className="block text-gray-300 mb-2">API Key</label>
+                  <input
+                    type="password"
+                    value={apiKeyInput}
+                    onChange={(e) => setApiKeyInput(e.target.value)}
+                    className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                    placeholder="Insira sua chave Bestfy"
+                    required
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={savingApiKey}
+                    onClick={() => setShowApiKeyModal(false)}
+                    className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 disabled:opacity-50"
+                  >
+                    Depois
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingApiKey}
+                    className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {savingApiKey ? 'Validando...' : 'Salvar Chave'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold text-white mb-2">Dashboard</h1>
@@ -259,6 +355,50 @@ export default function Dashboard({ user }: DashboardProps) {
           </div>
         </div>
 
+        {recoveredPayments.length > 0 && (
+          <div className="bg-gradient-to-r from-emerald-900/30 to-green-900/30 backdrop-blur-sm border border-emerald-700/50 rounded-xl p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="bg-emerald-500/20 p-2 rounded-lg">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-white">🎉 Transações Recuperadas</h2>
+                  <p className="text-emerald-400 text-sm">Vendas que foram recuperadas através do sistema de checkout</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-3xl font-bold text-emerald-400">{formatCurrency(stats.recoveredAmount)}</p>
+                <p className="text-sm text-gray-400">{stats.recovered} vendas recuperadas</p>
+              </div>
+            </div>
+            
+            <div className="bg-gray-900/50 rounded-lg p-4">
+              <div className="space-y-2">
+                {recoveredPayments.slice(0, 5).map((payment) => (
+                  <div key={payment.id} className="flex items-center justify-between py-2 border-b border-gray-700/50 last:border-0">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-emerald-600 rounded-full flex items-center justify-center text-white text-sm font-medium">
+                        {payment.customer_name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <p className="text-white font-medium text-sm">{payment.customer_name}</p>
+                        <p className="text-gray-400 text-xs">{payment.product_name}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-emerald-400 font-bold">{formatCurrency(Number(payment.amount))}</p>
+                      <p className="text-gray-400 text-xs">
+                        {payment.recovered_at ? new Date(payment.recovered_at).toLocaleDateString('pt-BR') : 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700 rounded-xl p-6">
           <h2 className="text-xl font-bold text-white mb-4">Transações Recentes</h2>
 
@@ -303,10 +443,13 @@ export default function Dashboard({ user }: DashboardProps) {
                         <td className="py-4 px-4">
                           <div className="flex items-center gap-2">
                             {getStatusBadge(payment.status)}
-                            {payment.converted_from_recovery && (
-                              <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-green-500/20 text-green-400">
-                                <CheckCircle2 className="w-3 h-3" />
-                                Recuperado
+                            {checkout && checkout.thank_you_slug && payment.status === 'paid' && (
+                              <span 
+                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-gradient-to-r from-emerald-500/20 to-green-500/20 text-emerald-400 border-2 border-emerald-500/40 shadow-sm"
+                                title={`🎉 Venda recuperada através do nosso checkout!\nRecuperado em: ${checkout.thank_you_accessed_at ? new Date(checkout.thank_you_accessed_at).toLocaleString('pt-BR') : 'N/A'}`}
+                              >
+                                <CheckCircle2 className="w-4 h-4" />
+                                💰 RECUPERADO
                               </span>
                             )}
                           </div>

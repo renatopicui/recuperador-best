@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './services/supabaseService';
 import AuthForm from './components/AuthForm';
-import Dashboard from './components/Dashboard';
+import DashboardLayout from './components/DashboardLayout';
 import AdminDashboard from './components/AdminDashboard';
 import Checkout from './components/Checkout';
+import ThankYou from './components/ThankYou';
 import SupabaseTest from './components/SupabaseTest';
 import { User } from '@supabase/supabase-js';
 
@@ -11,11 +12,13 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isCheckoutPage, setIsCheckoutPage] = useState(false);
+  const [isThankYouPage, setIsThankYouPage] = useState(false);
   const [showSupabaseTest, setShowSupabaseTest] = useState(false);
 
   useEffect(() => {
     const path = window.location.pathname;
     setIsCheckoutPage(path.startsWith('/checkout/'));
+    setIsThankYouPage(path.startsWith('/obrigado/'));
     setShowSupabaseTest(path === '/supabase-test');
 
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -36,6 +39,10 @@ function App() {
     return <Checkout />;
   }
 
+  if (isThankYouPage) {
+    return <ThankYou />;
+  }
+
   if (showSupabaseTest) {
     return <SupabaseTest />;
   }
@@ -54,7 +61,7 @@ function App() {
 
   const isAdmin = user.email === 'adm@bestfybr.com.br';
 
-  return isAdmin ? <AdminDashboard user={user} /> : <Dashboard user={user} />;
+  return isAdmin ? <AdminDashboard user={user} /> : <DashboardLayout user={user} />;
 }
 
 export default App;

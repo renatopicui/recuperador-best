@@ -123,7 +123,8 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const amountInCents = Math.round(Number(checkout.final_amount || checkout.amount) * 100);
+    // Os valores no banco JÁ estão em centavos, não multiplicar!
+    const amountInCents = Math.round(Number(checkout.final_amount || checkout.amount));
 
     let customerPayload;
     if (originalTransaction?.customer) {
@@ -190,20 +191,39 @@ Deno.serve(async (req: Request) => {
     }
 
     const bestfyData = JSON.parse(responseText);
-    console.log('Bestfy Data completo:', JSON.stringify(bestfyData, null, 2));
-    console.log('PIX object:', bestfyData.pix);
-    console.log('QR Code:', bestfyData.pix?.qrCode || bestfyData.pix?.qr_code);
+    console.log('🎯 Bestfy Data completo:', JSON.stringify(bestfyData, null, 2));
+    console.log('🎯 PIX object:', bestfyData.pix);
+    
+    // ✅ BESTFY USA "qrcode" (MINÚSCULO)!
+    const qrCode = bestfyData.pix?.qrcode  // ← ESTE É O CAMPO CORRETO!
+      || bestfyData.pix?.qrCode 
+      || bestfyData.pix?.qr_code 
+      || bestfyData.pix?.QrCode
+      || bestfyData.pix?.emvqrcps
+      || bestfyData.pix?.pixCopiaECola
+      || bestfyData.qrCode
+      || bestfyData.qr_code
+      || null;
+    
+    console.log('🎫 QR Code extraído:', qrCode ? `${qrCode.substring(0, 50)}...` : 'NULL');
+    
+    if (!qrCode) {
+      console.error('❌ ATENÇÃO: QR Code não encontrado na resposta da Bestfy!');
+      console.error('❌ Campos disponíveis no pix:', Object.keys(bestfyData.pix || {}));
+    }
 
     const updateData = {
       payment_bestfy_id: bestfyData.id?.toString(),
       payment_status: bestfyData.status,
-      pix_qrcode: bestfyData.pix?.qrCode || bestfyData.pix?.qr_code || null,
-      pix_expires_at: bestfyData.pix?.expiresAt || bestfyData.pix?.expires_at || null,
+      pix_qrcode: qrCode,
+      pix_expires_at: bestfyData.pix?.expiresAt || bestfyData.pix?.expires_at || bestfyData.pix?.expirationDate || null,
       pix_generated_at: new Date().toISOString(),
     };
 
-    console.log('Update data:', JSON.stringify(updateData));
+    console.log('💾 Update data para salvar no banco:', JSON.stringify(updateData, null, 2));
 
+    console.log('🔄 Atualizando checkout no banco...');
+    
     const updateResponse = await fetch(
       `${supabaseUrl}/rest/v1/checkout_links?id=eq.${checkout_id}`,
       {
@@ -218,13 +238,43 @@ Deno.serve(async (req: Request) => {
       }
     );
 
+    console.log('📡 Status do update:', updateResponse.status);
+
     if (!updateResponse.ok) {
       const errorText = await updateResponse.text();
-      console.error('Erro ao atualizar checkout:', errorText);
+      console.error('❌ Erro ao atualizar checkout:', errorText);
       throw new Error('Erro ao salvar dados do PIX');
     }
 
     const updatedCheckout = await updateResponse.json();
+    console.log('✅ Checkout atualizado com sucesso!');
+    console.log('✅ Dados atualizados:', JSON.stringify(updatedCheckout[0], null, 2));
+
+    // 🎯 VINCULAR PAYMENT AO CHECKOUT PARA RASTREAMENTO DE RECUPERAÇÃO
+    console.log('🔗 Vinculando payment ao checkout para rastreamento de recuperação...');
+    
+    const paymentUpdateResponse = await fetch(
+      `${supabaseUrl}/rest/v1/payments?id=eq.${checkout.payment_id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'apikey': supabaseServiceKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          recovery_source: 'recovery_checkout',
+          recovery_checkout_link_id: checkout_id,
+          bestfy_id: bestfyData.id?.toString()  // Atualiza com o novo bestfy_id do checkout
+        }),
+      }
+    );
+
+    if (paymentUpdateResponse.ok) {
+      console.log('✅ Payment vinculado ao checkout! Quando pago, será marcado como RECUPERADO.');
+    } else {
+      console.warn('⚠️ Não foi possível vincular payment ao checkout:', await paymentUpdateResponse.text());
+    }
 
     return new Response(
       JSON.stringify({ success: true, data: updatedCheckout[0] }),

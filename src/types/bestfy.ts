@@ -19,6 +19,7 @@ export interface Payment {
   recovery_source?: string;
   recovery_checkout_link_id?: string;
   converted_from_recovery?: boolean;
+  recovered_at?: string;
 }
 
 export interface CheckoutLink {
@@ -26,6 +27,9 @@ export interface CheckoutLink {
   user_id?: string;
   payment_id: string;
   checkout_slug: string;
+  thank_you_slug?: string;
+  thank_you_accessed_at?: string;
+  thank_you_access_count?: number;
   customer_name: string;
   customer_email: string;
   customer_document?: string;
@@ -49,6 +53,18 @@ export interface CheckoutLink {
   last_status_check?: string;
   items?: any;
   metadata?: any;
+}
+
+export interface ThankYouPageData {
+  thank_you_slug: string;
+  customer_name: string;
+  customer_email: string;
+  product_name: string;
+  amount: number;
+  final_amount: number;
+  payment_status: string;
+  payment_bestfy_id: string;
+  checkout_slug: string;
 }
 
 export interface ApiKey {

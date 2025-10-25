@@ -12,13 +12,13 @@ export const checkoutService = {
 
   async getCheckoutBySlug(slug: string): Promise<CheckoutLink | null> {
     const { data, error } = await supabase
-      .rpc('get_checkout_by_slug', { slug });
+      .rpc('get_checkout_by_slug', { p_slug: slug });
 
     if (error) throw error;
 
-    // A função RPC retorna um array, pegar o primeiro elemento
-    if (Array.isArray(data) && data.length > 0) {
-      return data[0];
+    // A função agora retorna jsonb diretamente
+    if (data) {
+      return data as CheckoutLink;
     }
 
     return null;

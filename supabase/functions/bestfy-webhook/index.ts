@@ -361,7 +361,148 @@ Deno.serve(async (req: Request) => {
         }
       );
     } else {
-      const defaultUserId = '1fa3b630-a6ad-411f-8891-da15ed5eb00d';
+      // MÉTODO PRINCIPAL: Resolve usuário pelo company_id do webhook
+      let resolvedUserId: string | null = null;
+      const webhookCompanyId = webhookData?.companyId;
+      
+      console.log(`🔍 [${requestId}] ========== DEBUG RESOLUÇÃO USUÁRIO ==========`);
+      console.log(`🔍 [${requestId}] Company ID do webhook: ${JSON.stringify(webhookCompanyId)}`);
+      console.log(`🔍 [${requestId}] Tipo do Company ID: ${typeof webhookCompanyId}`);
+      console.log(`🔍 [${requestId}] Transaction ID: ${paymentRecord.bestfy_id}`);
+      
+      if (webhookCompanyId) {
+        console.log(`🏢 [${requestId}] Buscando usuário pelo company_id: ${webhookCompanyId}`);
+        
+        try {
+          const queryUrl = `${supabaseUrl}/rest/v1/api_keys?select=user_id,bestfy_company_id,is_active,service&is_active=eq.true&service=eq.bestfy&bestfy_company_id=eq.${webhookCompanyId}`;
+          console.log(`🔍 [${requestId}] URL da query: ${queryUrl}`);
+          
+          const companyIdResponse = await fetch(queryUrl, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Bearer ${supabaseServiceKey}`,
+              'apikey': supabaseServiceKey,
+              'Content-Type': 'application/json',
+            }
+          });
+
+          console.log(`📊 [${requestId}] Status da resposta: ${companyIdResponse.status}`);
+
+          if (companyIdResponse.ok) {
+            const matchingKeys = await companyIdResponse.json();
+            console.log(`📊 [${requestId}] Registros encontrados: ${JSON.stringify(matchingKeys, null, 2)}`);
+            console.log(`📊 [${requestId}] Quantidade de registros: ${matchingKeys.length}`);
+            
+            if (Array.isArray(matchingKeys) && matchingKeys.length > 0) {
+              resolvedUserId = matchingKeys[0].user_id;
+              console.log(`✅ [${requestId}] *** SUCESSO: Usuário encontrado ***`);
+              console.log(`✅ [${requestId}] user_id: ${resolvedUserId}`);
+              console.log(`✅ [${requestId}] bestfy_company_id: ${matchingKeys[0].bestfy_company_id}`);
+            } else {
+              console.error(`❌ [${requestId}] Array VAZIO - nenhum registro encontrado`);
+              console.error(`❌ [${requestId}] Company ID procurado: ${webhookCompanyId}`);
+              console.error(`❌ [${requestId}] AÇÃO: Verificar se existe registro com bestfy_company_id = '${webhookCompanyId}'`);
+            }
+          } else {
+            const errorText = await companyIdResponse.text();
+            console.error(`❌ [${requestId}] Erro HTTP: ${companyIdResponse.status}`);
+            console.error(`❌ [${requestId}] Erro body: ${errorText}`);
+          }
+        } catch (companyIdErr) {
+          console.error(`❌ [${requestId}] EXCEÇÃO ao buscar:`, companyIdErr);
+        }
+      } else {
+        console.error(`❌ [${requestId}] webhookCompanyId é NULL/undefined`);
+        console.error(`❌ [${requestId}] Payload completo: ${JSON.stringify(webhookData, null, 2)}`);
+      }
+      
+      console.log(`🔍 [${requestId}] resolvedUserId FINAL: ${resolvedUserId}`);
+
+      // FALLBACK: Se não resolveu por company_id, tenta por email do cliente
+      if (!resolvedUserId) {
+        console.log(`🔄 [${requestId}] Tentando fallback por email...`);
+        
+        if (paymentRecord.customer_email) {
+          try {
+            const email = encodeURIComponent(paymentRecord.customer_email);
+            const byEmailResp = await fetch(
+              `${supabaseUrl}/rest/v1/payments?select=user_id,customer_email,created_at&customer_email=eq.${email}&order=created_at.desc&limit=1`,
+              {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${supabaseServiceKey}`,
+                  'apikey': supabaseServiceKey,
+                  'Content-Type': 'application/json',
+                }
+              }
+            );
+
+            if (byEmailResp.ok) {
+              const rows = await byEmailResp.json();
+              if (Array.isArray(rows) && rows.length > 0) {
+                resolvedUserId = rows[0].user_id;
+                console.log(`📧 [${requestId}] Dono inferido por email (${paymentRecord.customer_email}): ${resolvedUserId}`);
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [${requestId}] Erro no fallback por email:`, e);
+          }
+        }
+      }
+
+      const userIdToAssign = resolvedUserId || (exists ? existingUserId : null);
+      if (!userIdToAssign) {
+        console.warn(`⚠️ [${requestId}] Não foi possível identificar o usuário dono; tentando fallback por email`);
+        
+        // Fallback final: busca por email do cliente em transações existentes
+        if (paymentRecord.customer_email) {
+          try {
+            const email = encodeURIComponent(paymentRecord.customer_email);
+            const byEmailResp = await fetch(
+              `${supabaseUrl}/rest/v1/payments?select=user_id,customer_email,created_at&customer_email=eq.${email}&order=created_at.desc&limit=1`,
+              {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${supabaseServiceKey}`,
+                  'apikey': supabaseServiceKey,
+                  'Content-Type': 'application/json',
+                }
+              }
+            );
+
+            if (byEmailResp.ok) {
+              const rows = await byEmailResp.json();
+              if (Array.isArray(rows) && rows.length > 0) {
+                const fallbackUserId = rows[0].user_id;
+                console.log(`📧 [${requestId}] Usuário encontrado por email: ${fallbackUserId}`);
+                resolvedUserId = fallbackUserId;
+              }
+            }
+          } catch (e) {
+            console.warn(`⚠️ [${requestId}] Erro no fallback por email:`, e);
+          }
+        }
+
+        // Se ainda não resolveu, NÃO cria a transação
+        if (!resolvedUserId) {
+          console.error(`❌ [${requestId}] ERRO: Não foi possível identificar o usuário dono da transação`);
+          console.error(`❌ [${requestId}] Transaction ID: ${paymentRecord.bestfy_id}`);
+          console.error(`❌ [${requestId}] Company ID do webhook: ${webhookCompanyId}`);
+          console.error(`❌ [${requestId}] Customer Email: ${paymentRecord.customer_email}`);
+          
+          return new Response(JSON.stringify({
+            error: 'Owner user not resolved for transaction',
+            transaction_id: paymentRecord.bestfy_id,
+            company_id: webhookCompanyId,
+            customer_email: paymentRecord.customer_email,
+            message: 'Usuário não possui chave API cadastrada ou bestfy_company_id não foi salvo corretamente',
+            requestId: requestId
+          }), { 
+            status: 400, 
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+          });
+        }
+      }
 
       supabaseResponse = await fetch(`${supabaseUrl}/rest/v1/payments`, {
         method: 'POST',
@@ -373,11 +514,11 @@ Deno.serve(async (req: Request) => {
         },
         body: JSON.stringify({
           ...paymentRecord,
-          user_id: defaultUserId
+          user_id: resolvedUserId
         })
       });
 
-      console.log(`👤 [${requestId}] Novo payment criado com user_id: ${defaultUserId}`);
+      console.log(`👤 [${requestId}] Novo payment criado com user_id: ${resolvedUserId}`);
     }
 
     responseText = await supabaseResponse.text();

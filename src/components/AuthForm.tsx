@@ -6,19 +6,45 @@ export default function AuthForm() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
     setLoading(true);
 
     try {
       if (isLogin) {
         await authService.signIn(email, password);
       } else {
-        await authService.signUp(email, password);
+        // Validações adicionais para cadastro
+        if (!fullName.trim()) {
+          throw new Error('Nome completo é obrigatório');
+        }
+        if (!phone.trim()) {
+          throw new Error('Telefone é obrigatório');
+        }
+        
+        console.log('🔵 AuthForm: Dados do formulário antes de enviar:');
+        console.log('🔵 Email:', email);
+        console.log('🔵 Nome:', fullName);
+        console.log('🔵 Telefone:', phone);
+        
+        await authService.signUp(email, password, fullName, phone);
+        
+        console.log('✅ AuthForm: Cadastro concluído com sucesso');
+        setSuccess('Cadastro realizado! Verifique seu email para confirmar sua conta.');
+        
+        // Limpar formulário
+        setEmail('');
+        setPassword('');
+        setFullName('');
+        setPhone('');
       }
     } catch (err: any) {
       setError(err.message || 'Erro ao autenticar');
@@ -67,7 +93,41 @@ export default function AuthForm() {
           </div>
         )}
 
+        {success && (
+          <div className="bg-green-500/10 border border-green-500/50 text-green-400 px-4 py-3 rounded-lg mb-6">
+            {success}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
+          {!isLogin && (
+            <>
+              <div>
+                <label className="block text-gray-300 mb-2">Nome Completo</label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  required
+                  placeholder="Seu nome completo"
+                />
+              </div>
+
+              <div>
+                <label className="block text-gray-300 mb-2">Telefone</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500"
+                  required
+                  placeholder="(00) 00000-0000"
+                />
+              </div>
+            </>
+          )}
+
           <div>
             <label className="block text-gray-300 mb-2">Email</label>
             <input

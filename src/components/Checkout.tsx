@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { checkoutService } from '../services/checkoutService';
+import { recoveryService } from '../services/recoveryService';
 import { supabase } from '../services/supabaseService';
 import { CheckoutLink } from '../types/bestfy';
 import { CheckCircle2, Clock, XCircle, Copy, Check, Loader2, Timer, Package, ChevronDown, ChevronUp, Lock, CreditCard } from 'lucide-react';
@@ -65,7 +66,7 @@ export default function Checkout() {
       const path = window.location.pathname;
       const slug = path.split('/checkout/')[1];
 
-      console.log('Loading checkout with slug:', slug);
+      console.log('📥 [loadCheckout] Carregando checkout com slug:', slug);
 
       if (!slug) {
         setError('Link inválido');
@@ -75,7 +76,13 @@ export default function Checkout() {
 
       const data = await checkoutService.getCheckoutBySlug(slug);
 
-      console.log('Checkout data received:', data);
+      console.log('📥 [loadCheckout] Dados recebidos do banco:', {
+        slug: data?.checkout_slug,
+        amount: data?.amount,
+        final_amount: data?.final_amount,
+        has_qrcode: !!data?.pix_qrcode,
+        payment_status: data?.payment_status
+      });
 
       if (!data) {
         setError('Checkout não encontrado');
@@ -84,14 +91,19 @@ export default function Checkout() {
       }
 
       setCheckout(data);
-      console.log('Checkout data loaded:', data);
+      console.log('✅ [loadCheckout] Checkout atualizado no state');
 
       if (data.pix_qrcode) {
+        console.log('🎫 [loadCheckout] QR Code encontrado! Gerando imagem...');
         const qrImage = await QRCode.toDataURL(data.pix_qrcode);
         setQrCodeImage(qrImage);
         setIsProductDetailsOpen(false);
+        console.log('✅ [loadCheckout] QR Code gerado com sucesso!');
+      } else {
+        console.log('⏳ [loadCheckout] Ainda não há QR Code');
       }
     } catch (err: any) {
+      console.error('❌ [loadCheckout] Erro:', err);
       setError(err.message || 'Erro ao carregar checkout');
     } finally {
       setLoading(false);
@@ -104,6 +116,20 @@ export default function Checkout() {
     try {
       const data = await checkoutService.getCheckoutBySlug(checkout.checkout_slug);
       if (data && data.payment_status !== checkout.payment_status) {
+        // Se o pagamento foi confirmado, redirecionar para página de obrigado
+        if (data.payment_status === 'paid' && checkout.payment_status !== 'paid') {
+          console.log('🎉 Pagamento confirmado! Redirecionando para página de obrigado...');
+          
+          // Redirecionar para página de obrigado com o thank_you_slug
+          if (data.thank_you_slug) {
+            console.log('✅ Redirecionando para:', `/obrigado/${data.thank_you_slug}`);
+            window.location.href = `/obrigado/${data.thank_you_slug}`;
+            return; // Não continuar processamento
+          } else {
+            console.warn('⚠️ thank_you_slug não encontrado, usando comportamento antigo');
+          }
+        }
+        
         setCheckout(data);
         if (data.pix_qrcode) {
           const qrImage = await QRCode.toDataURL(data.pix_qrcode);
@@ -118,11 +144,17 @@ export default function Checkout() {
   const handleGeneratePix = async () => {
     if (!checkout) return;
 
+    console.log('🚀 [Checkout] Iniciando geração de PIX...');
+    console.log('🚀 [Checkout] Checkout ID:', checkout.id);
+    console.log('🚀 [Checkout] Valor final:', checkout.final_amount, 'centavos (R$', checkout.final_amount / 100, ')');
+
     setGeneratingPix(true);
     setError('');
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      console.log('📡 [Checkout] Chamando Edge Function...');
 
       const response = await fetch(`${supabaseUrl}/functions/v1/generate-checkout-pix`, {
         method: 'POST',
@@ -135,24 +167,32 @@ export default function Checkout() {
         }),
       });
 
+      console.log('📡 [Checkout] Status da resposta:', response.status);
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('❌ [Checkout] Erro na resposta:', errorData);
         throw new Error(errorData.error || 'Erro ao gerar PIX');
       }
 
       const result = await response.json();
+      console.log('✅ [Checkout] Resposta da Edge Function:', result);
 
       if (!result.success) {
         throw new Error(result.error || 'Erro ao gerar PIX');
       }
 
+      console.log('🔄 [Checkout] Recarregando checkout...');
       await loadCheckout();
+      
+      console.log('✅ [Checkout] PIX gerado com sucesso! Fechando detalhes do produto...');
       setIsProductDetailsOpen(false);
     } catch (err: any) {
-      console.error('Erro ao gerar PIX:', err);
+      console.error('❌ [Checkout] Erro ao gerar PIX:', err);
       setError(err.message || 'Erro ao gerar PIX');
     } finally {
       setGeneratingPix(false);
+      console.log('🏁 [Checkout] Processo finalizado');
     }
   };
 
@@ -165,10 +205,11 @@ export default function Checkout() {
   };
 
   const formatCurrency = (value: number) => {
+    // Valores no banco estão em centavos, então dividimos por 100
     return new Intl.NumberFormat('pt-BR', {
       style: 'currency',
       currency: 'BRL',
-    }).format(value);
+    }).format(value / 100);
   };
 
   const formatTime = (milliseconds: number) => {
@@ -211,48 +252,14 @@ export default function Checkout() {
   const StatusIcon = statusConfig.icon;
   const hasDiscount = checkout.discount_percentage && checkout.discount_percentage > 0;
 
-  if (checkout.payment_status === 'paid') {
+  // Se o pagamento já está pago, redirecionar para página de obrigado
+  if (checkout.payment_status === 'paid' && checkout.thank_you_slug) {
+    window.location.href = `/obrigado/${checkout.thank_you_slug}`;
     return (
-      <div className="min-h-screen bg-white flex items-center justify-center p-4">
-        <div className="max-w-2xl w-full text-center">
-          <div className="mb-8">
-            <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
-              <CheckCircle2 className="w-16 h-16 text-green-600" />
-            </div>
-            <h1 className="text-4xl font-bold text-gray-800 mb-4">Pagamento Confirmado!</h1>
-            <p className="text-xl text-gray-600 mb-2">Obrigado pela sua compra!</p>
-            <p className="text-gray-500">Você receberá um e-mail de confirmação em breve.</p>
-          </div>
-
-          <div className="bg-gray-50 rounded-2xl p-8 border border-gray-200">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Detalhes do Pedido</h2>
-            <div className="space-y-3 text-left">
-              <div className="flex justify-between">
-                <span className="text-gray-600">Produto:</span>
-                <span className="font-semibold text-gray-800">{checkout.product_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">Cliente:</span>
-                <span className="font-semibold text-gray-800">{checkout.customer_name}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-600">E-mail:</span>
-                <span className="font-semibold text-gray-800">{checkout.customer_email}</span>
-              </div>
-              <div className="flex justify-between pt-3 border-t border-gray-300">
-                <span className="text-gray-800 font-bold">Valor Pago:</span>
-                <span className="text-2xl font-bold text-green-600">
-                  {formatCurrency(Number(checkout.final_amount || checkout.amount))}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-200">
-            <p className="text-sm text-gray-600">
-              Se você tiver alguma dúvida sobre seu pedido, entre em contato conosco através do e-mail de confirmação.
-            </p>
-          </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 text-blue-600 animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Redirecionando...</p>
         </div>
       </div>
     );
